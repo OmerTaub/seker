@@ -282,6 +282,10 @@ def main() -> None:
             "quantiles (so it reflects the model’s typical error on similar data)."
         )
 
+        st.divider()
+        st.markdown("**Credit:** Omer Taub")
+        st.markdown("**Contact:** [linkedin.com/in/omertaub](https://www.linkedin.com/in/omertaub/)")
+
 
 if __name__ == "__main__":
     main()

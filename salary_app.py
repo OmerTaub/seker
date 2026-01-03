@@ -95,6 +95,7 @@ def main() -> None:
     st.caption("A comfortable UI for estimating monthly gross salary (NIS) from the survey-trained model.")
 
     data_path, cache_path = _ensure_paths()
+    cache_exists = Path(cache_path).is_file()
 
     # Model load (cached)
     if "model_bundle" not in st.session_state:
@@ -106,6 +107,12 @@ def main() -> None:
     # Sidebar (status + actions)
     with st.sidebar:
         st.subheader("Model")
+
+        if not cache_exists:
+            st.info(
+                "First run: no cached model found. The app will **train the model** automatically (may take ~1–2 minutes). "
+                "Wait for the metrics below to appear before estimating salary.",
+            )
 
         m = bundle.get("metrics", {})
         u = bundle.get("uncertainty", {})
@@ -155,6 +162,11 @@ def main() -> None:
     # ---------------------------
     with tabs[0]:
         st.subheader("Estimate your monthly salary (gross)")
+        st.info(
+            "Before estimating: make sure the **model is loaded/trained** (see the sidebar metrics). "
+            "On the first run, training may take a minute.",
+            icon="ℹ️",
+        )
 
         with st.form("estimate_form", border=True):
             left, right = st.columns(2, gap="large")

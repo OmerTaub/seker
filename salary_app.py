@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -76,6 +77,29 @@ def _field_salary_table(df: pd.DataFrame) -> pd.DataFrame:
 
     out = pd.DataFrame(rows).sort_values("Avg Salary", ascending=False, ignore_index=True)
     return out
+
+
+def _graduates_df(df: pd.DataFrame) -> pd.DataFrame:
+    grads = df[df["Employment_Status"] == "משרה חלקית/מלאה"].copy()
+    if "Monthly_Salary_Numeric" in grads.columns:
+        grads["Monthly_Salary_Numeric"] = pd.to_numeric(grads["Monthly_Salary_Numeric"], errors="coerce")
+    if "Professional_Exp_Mapped" in grads.columns:
+        grads["Professional_Exp_Mapped"] = pd.to_numeric(grads["Professional_Exp_Mapped"], errors="coerce")
+    grads = grads[grads["Monthly_Salary_Numeric"].notna()].copy()
+    return grads
+
+
+def _cat_salary_table(grads: pd.DataFrame, col: str) -> pd.DataFrame:
+    if col not in grads.columns:
+        return pd.DataFrame(columns=[col, "Avg Salary", "Median Salary", "Count"])
+    g = (
+        grads.groupby(col, dropna=False)["Monthly_Salary_Numeric"]
+        .agg(["mean", "median", "count"])
+        .reset_index()
+        .rename(columns={"mean": "Avg Salary", "median": "Median Salary", "count": "Count"})
+        .sort_values("Avg Salary", ascending=False, ignore_index=True)
+    )
+    return g
 
 
 def _ensure_paths() -> Tuple[str, str]:
@@ -275,12 +299,186 @@ def main() -> None:
         with st.spinner("Loading dataset…"):
             df = _load_df_cached(data_path)
 
+        grads = _graduates_df(df)
+
+        st.caption(
+            f"Insights are computed from **{len(grads)}** employed respondents with a numeric salary in the dataset."
+        )
+
+        # Filters (lightweight, optional)
+        with st.expander("Filters (optional)", expanded=False):
+            f1, f2, f3 = st.columns(3)
+            with f1:
+                loc_filter = st.multiselect(
+                    "Location",
+                    sorted([x for x in grads.get("Location_En", pd.Series(dtype=str)).dropna().unique().tolist()]),
+                    default=[],
+                )
+            with f2:
+                mode_filter = st.multiselect(
+                    "Work mode",
+                    sorted([x for x in grads.get("Work_Mode_En", pd.Series(dtype=str)).dropna().unique().tolist()]),
+                    default=[],
+                )
+            with f3:
+                degree_filter = st.multiselect(
+                    "Degree",
+                    sorted([x for x in grads.get("Degree_Level", pd.Series(dtype=str)).dropna().unique().tolist()]),
+                    default=[],
+                )
+
+            filtered = grads.copy()
+            if loc_filter and "Location_En" in filtered.columns:
+                filtered = filtered[filtered["Location_En"].isin(loc_filter)]
+            if mode_filter and "Work_Mode_En" in filtered.columns:
+                filtered = filtered[filtered["Work_Mode_En"].isin(mode_filter)]
+            if degree_filter and "Degree_Level" in filtered.columns:
+                filtered = filtered[filtered["Degree_Level"].isin(degree_filter)]
+
+            st.caption(f"Using **{len(filtered)}** rows after filters.")
+        if "filtered" not in locals():
+            filtered = grads
+
+        # 1) Salary distribution
+        st.markdown("**Salary distribution (gross monthly)**")
+        hist = (
+            alt.Chart(filtered)
+            .mark_bar(opacity=0.9)
+            .encode(
+                x=alt.X("Monthly_Salary_Numeric:Q", bin=alt.Bin(maxbins=30), title="Monthly salary (NIS)"),
+                y=alt.Y("count():Q", title="Count"),
+                tooltip=[alt.Tooltip("count():Q", title="Count")],
+            )
+            .properties(height=260)
+        )
+        st.altair_chart(hist, use_container_width=True)
+
+        # 2) Salary vs experience
+        st.markdown("**Salary vs years of experience**")
+        exp_df = filtered[filtered["Professional_Exp_Mapped"].notna()].copy()
+        scatter = (
+            alt.Chart(exp_df)
+            .mark_circle(size=48, opacity=0.35)
+            .encode(
+                x=alt.X("Professional_Exp_Mapped:Q", title="Years of experience"),
+                y=alt.Y("Monthly_Salary_Numeric:Q", title="Monthly salary (NIS)"),
+                tooltip=[
+                    alt.Tooltip("Professional_Exp_Mapped:Q", title="Experience"),
+                    alt.Tooltip("Monthly_Salary_Numeric:Q", title="Salary", format=",.0f"),
+                    alt.Tooltip("Location_En:N", title="Location"),
+                    alt.Tooltip("Work_Mode_En:N", title="Work mode"),
+                ],
+            )
+            .properties(height=320)
+        )
+        trend = (
+            alt.Chart(exp_df)
+            .transform_regression("Professional_Exp_Mapped", "Monthly_Salary_Numeric")
+            .mark_line(color="#3b82f6", strokeWidth=3)
+            .encode(x="Professional_Exp_Mapped:Q", y="Monthly_Salary_Numeric:Q")
+        )
+        st.altair_chart(scatter + trend, use_container_width=True)
+
+        # 3) Category comparisons
+        st.markdown("**Category comparisons**")
+        c_left, c_right = st.columns(2, gap="large")
+
+        with c_left:
+            st.markdown("**By location (box plot)**")
+            if "Location_En" in filtered.columns and filtered["Location_En"].notna().any():
+                loc_box = (
+                    alt.Chart(filtered.dropna(subset=["Location_En"]))
+                    .mark_boxplot(size=24)
+                    .encode(
+                        x=alt.X(
+                            "Location_En:N",
+                            sort=alt.SortField("Monthly_Salary_Numeric", op="median", order="descending"),
+                            title="Location",
+                        ),
+                        y=alt.Y("Monthly_Salary_Numeric:Q", title="Monthly salary (NIS)"),
+                        tooltip=[alt.Tooltip("Location_En:N", title="Location")],
+                    )
+                    .properties(height=320)
+                )
+                st.altair_chart(loc_box, use_container_width=True)
+            else:
+                st.info("Location data not available for chart.")
+
+        with c_right:
+            st.markdown("**By work mode (avg + count)**")
+            mode_tbl = _cat_salary_table(filtered, "Work_Mode_En")
+            if not mode_tbl.empty:
+                mode_bar = (
+                    alt.Chart(mode_tbl)
+                    .mark_bar()
+                    .encode(
+                        x=alt.X("Work_Mode_En:N", sort="-y", title="Work mode"),
+                        y=alt.Y("Avg Salary:Q", title="Average salary (NIS)"),
+                        tooltip=[
+                            alt.Tooltip("Work_Mode_En:N", title="Work mode"),
+                            alt.Tooltip("Avg Salary:Q", title="Avg", format=",.0f"),
+                            alt.Tooltip("Median Salary:Q", title="Median", format=",.0f"),
+                            alt.Tooltip("Count:Q", title="Count"),
+                        ],
+                    )
+                    .properties(height=320)
+                )
+                st.altair_chart(mode_bar, use_container_width=True)
+            else:
+                st.info("Work mode data not available for chart.")
+
+        # 4) Benefits comparisons
+        st.markdown("**Benefits impact (avg salary)**")
+        b1, b2 = st.columns(2, gap="large")
+        with b1:
+            keren_tbl = _cat_salary_table(filtered, "Keren_Hishtalmut_En")
+            if not keren_tbl.empty:
+                keren_bar = (
+                    alt.Chart(keren_tbl)
+                    .mark_bar()
+                    .encode(
+                        x=alt.X("Keren_Hishtalmut_En:N", title="Keren Hishtalmut"),
+                        y=alt.Y("Avg Salary:Q", title="Average salary (NIS)"),
+                        tooltip=[
+                            alt.Tooltip("Keren_Hishtalmut_En:N", title="Keren"),
+                            alt.Tooltip("Avg Salary:Q", title="Avg", format=",.0f"),
+                            alt.Tooltip("Count:Q", title="Count"),
+                        ],
+                    )
+                    .properties(height=260)
+                )
+                st.altair_chart(keren_bar, use_container_width=True)
+            else:
+                st.info("Keren Hishtalmut data not available for chart.")
+
+        with b2:
+            meals_tbl = _cat_salary_table(filtered, "Meals_En")
+            if not meals_tbl.empty:
+                meals_bar = (
+                    alt.Chart(meals_tbl)
+                    .mark_bar()
+                    .encode(
+                        x=alt.X("Meals_En:N", title="Meals"),
+                        y=alt.Y("Avg Salary:Q", title="Average salary (NIS)"),
+                        tooltip=[
+                            alt.Tooltip("Meals_En:N", title="Meals"),
+                            alt.Tooltip("Avg Salary:Q", title="Avg", format=",.0f"),
+                            alt.Tooltip("Count:Q", title="Count"),
+                        ],
+                    )
+                    .properties(height=260)
+                )
+                st.altair_chart(meals_bar, use_container_width=True)
+            else:
+                st.info("Meals data not available for chart.")
+
+        # 5) Field premium (existing)
+        st.markdown("**Average salary by field (overlapping groups)**")
         field_tbl = _field_salary_table(df)
         if field_tbl.empty:
             st.info("No field chart available (not enough samples per field).")
         else:
-            st.markdown("**Average salary by field (overlapping groups)**")
-            st.bar_chart(field_tbl.set_index("Field")["Avg Salary"], height=380)
+            st.bar_chart(field_tbl.set_index("Field")["Avg Salary"], height=320)
             st.dataframe(
                 field_tbl.style.format({"Avg Salary": "₪ {:,.0f}"}),
                 use_container_width=True,

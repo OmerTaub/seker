@@ -93,11 +93,6 @@ def main() -> None:
 
     st.title("Architect AI — Salary Estimator")
     st.caption("A comfortable UI for estimating monthly gross salary (NIS) from the survey-trained model.")
-    st.warning(
-        "Disclaimer: This tool is based on a **small dataset** and provides **estimates only**. "
-        "Results may be **inaccurate** and should not be treated as financial/contract advice.",
-        icon="⚠️",
-    )
 
     data_path, cache_path = _ensure_paths()
     cache_exists = Path(cache_path).is_file()

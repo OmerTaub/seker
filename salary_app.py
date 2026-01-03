@@ -93,6 +93,11 @@ def main() -> None:
 
     st.title("Architect AI — Salary Estimator")
     st.caption("A comfortable UI for estimating monthly gross salary (NIS) from the survey-trained model.")
+    st.warning(
+        "Disclaimer: This tool is based on a **small dataset** and provides **estimates only**. "
+        "Results may be **inaccurate** and should not be treated as financial/contract advice.",
+        icon="⚠️",
+    )
 
     data_path, cache_path = _ensure_paths()
     cache_exists = Path(cache_path).is_file()
@@ -241,6 +246,10 @@ def main() -> None:
             pred = float(out.get("pred", 0.0))
 
             st.divider()
+            st.caption(
+                "Disclaimer: This is an **estimate** based on limited survey data and typical model error. "
+                "Your real salary may differ significantly."
+            )
             c1, c2, c3 = st.columns([2, 1, 1])
             c1.metric("Estimated monthly salary", _nis(pred))
 
@@ -292,6 +301,11 @@ def main() -> None:
             "This app uses a cross-validated, hyperparameter-tuned model trained on architecture survey data.\n\n"
             "The estimate is **monthly gross salary (NIS)**. The range is derived from out-of-fold CV absolute-error "
             "quantiles (so it reflects the model’s typical error on similar data)."
+        )
+        st.warning(
+            "Disclaimer: The dataset is relatively small and may not represent the full market. "
+            "Outputs are **estimates** and can be **not accurate**.",
+            icon="⚠️",
         )
 
         st.divider()
